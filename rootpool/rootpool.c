@@ -36,14 +36,21 @@ main(int argc, char **argv)
 	const char *health;
 	uint_t vsc;
 	char *bootfs;
+	size_t count_hit_candidates = 0;
+	size_t count_hit_outputs = 0;
 
-	if ((g_zfs = libzfs_init()) == NULL)
+	if ((g_zfs = libzfs_init()) == NULL) {
+		(void) fprintf(stderr, "FATAL: rootpool helper: Could not libzfs_init()\n");
 		return (1);
+	}
 
-	if ((searchdirs = calloc(1, sizeof (char *))) == NULL)
+	if ((searchdirs = calloc(2, sizeof (char *))) == NULL) {
+		(void) fprintf(stderr, "FATAL: rootpool helper: Could not allocate searchdirs\n");
 		return (1);
+	}
 
 	searchdirs[0] = "/dev/dsk";
+	searchdirs[1] = NULL; // sentry
 	pdata.path = searchdirs;
 	pdata.paths = 1;
 	pdata.poolname = searchname;
@@ -52,12 +59,14 @@ main(int argc, char **argv)
 
 	pools = zpool_search_import(g_zfs, &pdata);
 	if (pools == NULL) {
+		(void) fprintf(stderr, "FATAL: rootpool helper: Could not zpool_search_import(): returned NULL\n");
 		free(searchdirs);
 		return (1);
 	}
 
 	elem = NULL;
 	while ((elem = nvlist_next_nvpair(pools, elem)) != NULL) {
+		count_hit_candidates++;
 		verify(nvpair_value_nvlist(elem, &config) == 0);
 		verify(nvlist_lookup_string(config, ZPOOL_CONFIG_POOL_NAME,
 		    &name) == 0);
@@ -73,9 +82,19 @@ main(int argc, char **argv)
 			continue;
 
 		health = zpool_state_to_name(vs->vs_state, vs->vs_aux);
-		(void) printf("%s;%llu;%s;%s\n", name,
+		(void) printf("%s;%" PRIu64 ";%s;%s\n", name,
 		    (u_longlong_t)guid, health, bootfs);
+		count_hit_outputs++;
 	}
+
+	if (count_hit_candidates == 0) {
+		(void) fprintf(stderr, "WARNING: rootpool helper: Did not locate any disks with a pool via zpool_search_import()\n");
+	}
+
+	if (count_hit_outputs == 0) {
+		(void) fprintf(stderr, "WARNING: rootpool helper: Did not locate any pools via zpool_search_import() with a bootfs property\n");
+	}
+
 	nvlist_free(pools);
 	free(searchdirs);
 	return (0);
